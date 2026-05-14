@@ -1,0 +1,22 @@
+
+ATG_SAFE_CACHE_CLEANER/
+
+│
+├── main.py
+├── ui_main.py
+├── cleaner.py
+├── browser_detector.py
+├── license_manager.py
+├── license_dialog.py
+├── autostart.py
+├── config.json
+│
+├── assets/
+│   ├── icon.ico
+│   └── logo.png
+│
+├── logs/
+│
+├── build_onefile.bat
+├── build_onefile.spec
+└── requirements.txt
