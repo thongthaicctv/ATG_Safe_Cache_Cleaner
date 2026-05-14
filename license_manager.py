@@ -15,18 +15,58 @@ SHEET_CSV_URL = (
 )
 
 
+def run_cmd(cmd):
+    try:
+        result = subprocess.check_output(
+            cmd,
+            shell=True,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            text=True
+        )
+        return result.strip()
+    except Exception:
+        return ""
+
+
+def get_windows_uuid():
+    output = run_cmd("wmic csproduct get uuid")
+
+    lines = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and "UUID" not in line.upper()
+    ]
+
+    if lines:
+        return lines[0]
+
+    return ""
+
+
+def get_bios_serial():
+    output = run_cmd("wmic bios get serialnumber")
+
+    lines = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and "SERIAL" not in line.upper()
+    ]
+
+    if lines:
+        return lines[0]
+
+    return ""
+
+
 def get_machine_code():
+    uuid_code = get_windows_uuid()
+    bios_serial = get_bios_serial()
+    computer_name = platform.node()
 
-    system = platform.system()
-    node = platform.node()
-    mac = hex(uuid.getnode())
+    raw = f"{uuid_code}|{bios_serial}|{computer_name}|{APP_SECRET}"
 
-    raw = f"{system}-{node}-{mac}-{APP_SECRET}"
-
-    return hashlib.sha256(
-        raw.encode()
-    ).hexdigest()[:16].upper()
-
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
 
 def check_license():
 

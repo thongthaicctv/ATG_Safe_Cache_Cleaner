@@ -15,12 +15,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QCheckBox,
-  
     QFileDialog,
     QSpinBox,
     QMessageBox,
     QGroupBox,
     QListWidget,
+    QScrollArea,
 )
 
 from safe_cleaner import scan_cache, clean_cache, format_size
@@ -76,6 +76,10 @@ def resource_path(relative_path: str) -> str:
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+
+        self.resize(860, 720)
+        self.setMinimumSize(760, 560)
+
 
         self.is_quitting = False
         
@@ -157,7 +161,16 @@ class MainWindow(QWidget):
 
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        content = QWidget()
+        main_layout = QVBoxLayout(content)
+
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
 
         # ================= HEADER =================
         header = QHBoxLayout()
