@@ -21,13 +21,13 @@ class LicenseDialog(QDialog):
         machine = get_machine_code()
 
         label = QLabel(
-            f"Mã máy:\n\n{machine}"
+            f"Mã license:\n\n{machine}"
         )
 
         layout.addWidget(label)
 
         btn_copy = QPushButton(
-            "Copy mã máy"
+            "Copy mã license gửi về Zalo 0904143113 để được cấp license"
         )
 
         btn_copy.clicked.connect(
