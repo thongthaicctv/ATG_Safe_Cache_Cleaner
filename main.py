@@ -1,6 +1,7 @@
 import json
 import sys
 import time
+import os
 
 
 from pathlib import Path
@@ -63,7 +64,24 @@ from license_manager import check_license
 from license_ui import LicenseDialog
 
 
-CONFIG_FILE = "config.json"
+APP_NAME = "ATG_SAFE_CACHE_CLEANER"
+
+
+def get_app_data_dir():
+    base = os.getenv("LOCALAPPDATA")
+
+    if base:
+        path = Path(base) / APP_NAME
+    else:
+        path = Path.home() / APP_NAME
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+CONFIG_FILE = get_app_data_dir() / "config.json"
+
+
 ICON_FILE = "assets/icon.ico"
 LOGO_FILE = "assets/logo.png"
 
@@ -82,7 +100,14 @@ class MainWindow(QWidget):
 
 
         self.is_quitting = False
-        
+
+        #xuất exe thường khó debug close to tray, nên tạm thời cho phép close luôn để dễ đóng khi cần thiết
+        self.allow_close_to_tray = True
+
+        # debug: tắt close to tray để dễ đóng khi cần thiết
+        #self.allow_close_to_tray = False
+
+
         self.last_watchdog_clean = 0
 
         self.setWindowTitle("ATG Safe Cache Cleaner")
@@ -109,7 +134,7 @@ class MainWindow(QWidget):
             self.watchdog_check
         )
 
-        self.watchdog_timer.start(30000)
+        QTimer.singleShot(10000, self.start_watchdog)
     
     def watchdog_check(self):
 
@@ -158,7 +183,9 @@ class MainWindow(QWidget):
             f"Watchdog OK | Cache: {format_size(total_size)} | {total_files} file"
         )
         
-
+    def start_watchdog(self):
+        self.watchdog_timer.start(30000)
+        self.log("Watchdog đã khởi động")
 
     def init_ui(self):
         root_layout = QVBoxLayout(self)
@@ -684,42 +711,29 @@ class MainWindow(QWidget):
         self.tray_icon = QSystemTrayIcon(self)
 
         icon_path = resource_path(ICON_FILE)
+        icon = QIcon(icon_path)
 
-        self.tray_icon.setIcon(
-            QIcon(icon_path)
-        )
+        self.tray_icon.setIcon(icon)
+        self.tray_icon.setToolTip("ATG Safe Cache Cleaner")
 
-        self.tray_icon.setToolTip(
-            "ATG Safe Cache Cleaner"
-        )
+        self.tray_menu = QMenu()
 
-        tray_menu = QMenu()
+        action_show = QAction("Mở phần mềm", self)
+        action_exit = QAction("Thoát hoàn toàn", self)
 
-        action_show = QAction("Mở")
-        action_quit = QAction("Thoát")
+        action_show.triggered.connect(self.show_normal)
+        action_exit.triggered.connect(self.exit_app)
 
-        action_show.triggered.connect(
-            self.show_normal
-        )
+        self.tray_menu.addAction(action_show)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction(action_exit)
 
-        action_quit.triggered.connect(
-            self.quit_app
-        )
-
-        tray_menu.addAction(action_show)
-        tray_menu.addSeparator()
-        tray_menu.addAction(action_quit)
-
-        self.tray_icon.setContextMenu(tray_menu)
-
-        self.tray_menu = tray_menu
-
-        self.tray_icon.activated.connect(
-            self.on_tray_activated
-        )
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
 
         self.tray_icon.show()
 
+        
     def show_normal(self):
 
         self.show()
@@ -747,7 +761,31 @@ class MainWindow(QWidget):
         elif reason == QSystemTrayIcon.DoubleClick:
             self.show_normal()
 
-    
+    def exit_app(self):
+
+        self.is_quitting = True
+        self.allow_close_to_tray = False
+
+        try:
+            self.auto_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            self.watchdog_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "tray_icon"):
+                self.tray_icon.hide()
+                self.tray_icon.deleteLater()
+        except Exception:
+            pass
+
+        QApplication.quit()
+        
+
     """def closeEvent(self, event):
 
         self.is_quitting = True
@@ -761,22 +799,20 @@ class MainWindow(QWidget):
     
     def closeEvent(self, event):
 
-        if self.is_quitting:
+        if self.is_quitting or not self.allow_close_to_tray:
             event.accept()
             return
 
         event.ignore()
-
         self.hide()
 
         if hasattr(self, "tray_icon"):
             self.tray_icon.showMessage(
                 "ATG Safe Cache Cleaner",
-                "Ứng dụng vẫn đang chạy nền.",
+                "Phần mềm vẫn đang chạy nền. Click icon tray để mở hoặc thoát.",
                 QSystemTrayIcon.Information,
                 3000
             )
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
