@@ -586,6 +586,7 @@ class MainWindow(QWidget):
     def default_config(self):
         return {
             "old_file_folders": [],
+            "autostart": False,
             "keep_days": 60,
             "keep_cache_days": 7,
             "recycle_bin": True,
@@ -631,6 +632,7 @@ class MainWindow(QWidget):
 
         try:
             self.config["old_file_folders"] = self.get_selected_folders()
+            self.config["autostart"] = self.chk_autostart.isChecked()
             self.config["keep_days"] = self.spin_keep_days.value()
             self.config["keep_cache_days"] = self.spin_keep_cache_days.value()
             self.config["recycle_bin"] = self.chk_recycle.isChecked()
@@ -673,13 +675,24 @@ class MainWindow(QWidget):
         else:
             self.auto_timer.stop()
 
+        config_wants_autostart = self.config.get("autostart", False)
+        autostart_enabled = False
+
         try:
+            autostart_enabled = is_autostart_enabled()
+
+            if config_wants_autostart and not autostart_enabled:
+                enable_autostart()
+                autostart_enabled = is_autostart_enabled()
+
             self.chk_autostart.blockSignals(True)
-            self.chk_autostart.setChecked(is_autostart_enabled())
+            self.chk_autostart.setChecked(autostart_enabled)
             self.chk_autostart.blockSignals(False)
-        except Exception:
+            self.config["autostart"] = autostart_enabled
+        except Exception as exc:
             self.chk_autostart.blockSignals(False)
             self.chk_autostart.setChecked(False)
+            write_log(f"Loi dong bo autostart: {exc}")
 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Chon thu muc can don file cu")
