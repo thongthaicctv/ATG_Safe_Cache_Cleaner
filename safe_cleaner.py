@@ -70,6 +70,20 @@ BLOCK_FOLDERS = [
     "Web Data",
 ]
 
+TARGET_DISCOVERY_TTL_SECONDS = 10 * 60
+
+_TARGET_FOLDER_LOOKUP = {
+    name.lower(): name
+    for name in SAFE_FOLDERS + DEEP_FOLDERS
+}
+_BLOCK_FOLDER_NAMES = {
+    name.lower()
+    for name in BLOCK_FOLDERS
+}
+
+_target_cache_timestamp = 0.0
+_target_cache = {}
+
 
 def expand_path(path):
     return Path(os.path.expandvars(path))
@@ -85,46 +99,86 @@ def is_block_folder(path):
     return False
 
 
-def get_target_folders():
+def _discover_target_folders():
+    discovered = {
+        name: set()
+        for name in SAFE_FOLDERS + DEEP_FOLDERS
+    }
 
-    mode = get_clean_mode()
+    for root in BROWSER_CACHE_DIRS:
+        root_path = expand_path(root)
 
-    targets = []
+        try:
+            root_exists = root_path.exists()
+        except Exception:
+            continue
+
+        if not root_exists:
+            continue
+
+        try:
+            for current_root, dir_names, _ in os.walk(root_path):
+                current_path = Path(current_root)
+                next_dir_names = []
+
+                for dir_name in dir_names:
+                    dir_name_lower = dir_name.lower()
+
+                    target_name = _TARGET_FOLDER_LOOKUP.get(dir_name_lower)
+
+                    if target_name:
+                        discovered[target_name].add(current_path / dir_name)
+                        continue
+
+                    if dir_name_lower in _BLOCK_FOLDER_NAMES:
+                        continue
+
+                    next_dir_names.append(dir_name)
+
+                # Do not descend into blocked folders or known cache folders.
+                dir_names[:] = next_dir_names
+
+        except Exception:
+            pass
+
+    return {
+        name: tuple(sorted(paths))
+        for name, paths in discovered.items()
+        if paths
+    }
+
+
+def get_target_folders(mode=None, force_refresh=False):
+    global _target_cache
+    global _target_cache_timestamp
+
+    if mode is None:
+        mode = get_clean_mode()
+
+    now = time.monotonic()
+
+    if (
+        force_refresh
+        or not _target_cache
+        or now - _target_cache_timestamp >= TARGET_DISCOVERY_TTL_SECONDS
+    ):
+        _target_cache = _discover_target_folders()
+        _target_cache_timestamp = now
 
     folders = SAFE_FOLDERS.copy()
 
     if mode == "DEEP":
         folders += DEEP_FOLDERS
 
-    for root in BROWSER_CACHE_DIRS:
+    targets = []
 
-        root_path = expand_path(root)
+    for folder_name in folders:
+        targets.extend(_target_cache.get(folder_name, ()))
 
-        if not root_path.exists():
-            continue
-
-        try:
-            for folder_name in folders:
-
-                for found in root_path.rglob("*"):
-
-                    if found.name != folder_name:
-                        continue
-
-                    if is_block_folder(found):
-                        continue
-
-                    targets.append(found)
-
-        except Exception:
-            pass
-
-    return list(set(targets))
+    return targets
 
 
-def get_old_files(path, keep_days=7):
-    result = []
-
+def iter_old_files(path, keep_days=7):
     delete_all = keep_days <= 0
 
     if not delete_all:
@@ -138,13 +192,10 @@ def get_old_files(path, keep_days=7):
                 fp = Path(root) / file
 
                 try:
-                    if delete_all:
-                        result.append(fp)
-                    else:
-                        mtime = fp.stat().st_mtime
+                    stats = fp.stat()
 
-                        if mtime < cutoff:
-                            result.append(fp)
+                    if delete_all or stats.st_mtime < cutoff:
+                        yield fp, stats.st_size
 
                 except Exception:
                     pass
@@ -152,19 +203,20 @@ def get_old_files(path, keep_days=7):
     except Exception:
         pass
 
-    return result
+
+def get_old_files(path, keep_days=7):
+    return [
+        file_path
+        for file_path, _ in iter_old_files(path, keep_days)
+    ]
 
 
 def clean_cache(
     keep_days=7,
     log_callback=None
 ):
-
     mode = get_clean_mode()
-
-    targets = get_target_folders()
-
-
+    targets = get_target_folders(mode=mode)
 
     deleted_files = 0
     deleted_size = 0
@@ -173,18 +225,9 @@ def clean_cache(
     for folder in targets:
 
         try:
-
-            old_files = get_old_files(
-                folder,
-                keep_days
-            )
-
-            for file in old_files:
+            for file, size in iter_old_files(folder, keep_days):
 
                 try:
-
-                    size = file.stat().st_size
-
                     file.unlink()
 
                     deleted_files += 1
@@ -215,28 +258,16 @@ def clean_cache(
 
 
 def scan_cache(keep_days=7):
-
-    targets = get_target_folders()
+    mode = get_clean_mode()
+    targets = get_target_folders(mode=mode)
 
     total_size = 0
     total_files = 0
 
     for folder in targets:
-
-        old_files = get_old_files(
-            folder,
-            keep_days
-        )
-
-        for file in old_files:
-
-            try:
-
-                total_size += file.stat().st_size
-                total_files += 1
-
-            except Exception:
-                pass
+        for _, size in iter_old_files(folder, keep_days):
+            total_size += size
+            total_files += 1
 
     return (
         targets,

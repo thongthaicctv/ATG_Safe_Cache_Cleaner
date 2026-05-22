@@ -2,11 +2,7 @@
 
 from PyInstaller.utils.hooks import collect_submodules
 
-hiddenimports = []
-hiddenimports += collect_submodules("PySide6")
-hiddenimports += collect_submodules("requests")
-hiddenimports += collect_submodules("psutil")
-hiddenimports += collect_submodules("send2trash")
+hiddenimports = collect_submodules("PySide6.QtMultimedia")
 
 a = Analysis(
     ["main.py"],
@@ -15,6 +11,7 @@ a = Analysis(
     datas=[
         ("assets/icon.ico", "assets"),
         ("assets/logo.png", "assets"),
+        ("assets/disk_low.wav", "assets"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

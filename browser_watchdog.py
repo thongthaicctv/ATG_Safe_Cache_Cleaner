@@ -1,12 +1,21 @@
+import time
+
 import psutil
 
 
 BROWSER_PROCESSES = {
     "chrome.exe": "Google Chrome",
     "msedge.exe": "Microsoft Edge",
-    "browser.exe": "Cốc Cốc / UC Browser",
+    "browser.exe": "Coc Coc / UC Browser",
     "firefox.exe": "Mozilla Firefox",
+    "ucbrowser.exe": "UC Browser",
+    "ucbrowsercore.exe": "UC Browser",
 }
+
+MEMORY_CACHE_TTL_SECONDS = 5.0
+
+_browser_memory_cache = {}
+_browser_memory_cache_timestamp = 0.0
 
 
 def format_size(size):
@@ -17,44 +26,56 @@ def format_size(size):
     return f"{size:.2f} PB"
 
 
-def get_browser_memory():
-    result = {}
+def get_browser_memory(force_refresh=False):
+    global _browser_memory_cache
+    global _browser_memory_cache_timestamp
 
-    for proc in psutil.process_iter(["pid", "name", "memory_info"]):
-        try:
-            name = proc.info["name"]
+    now = time.monotonic()
 
-            if not name:
-                continue
+    if (
+        force_refresh
+        or not _browser_memory_cache
+        or now - _browser_memory_cache_timestamp >= MEMORY_CACHE_TTL_SECONDS
+    ):
+        result = {}
 
-            name_lower = name.lower()
+        for proc in psutil.process_iter(["name", "memory_info"]):
+            try:
+                name = proc.info["name"]
 
-            if name_lower not in BROWSER_PROCESSES:
-                continue
+                if not name:
+                    continue
 
-            browser_name = BROWSER_PROCESSES[name_lower]
-            memory = proc.info["memory_info"].rss
+                browser_name = BROWSER_PROCESSES.get(name.lower())
 
-            if browser_name not in result:
-                result[browser_name] = {
-                    "processes": 0,
-                    "memory": 0,
-                }
+                if not browser_name:
+                    continue
 
-            result[browser_name]["processes"] += 1
-            result[browser_name]["memory"] += memory
+                memory = proc.info["memory_info"].rss
 
-        except Exception:
-            pass
+                if browser_name not in result:
+                    result[browser_name] = {
+                        "processes": 0,
+                        "memory": 0,
+                    }
 
-    return result
+                result[browser_name]["processes"] += 1
+                result[browser_name]["memory"] += memory
+
+            except Exception:
+                pass
+
+        _browser_memory_cache = result
+        _browser_memory_cache_timestamp = now
+
+    return _browser_memory_cache
 
 
 def get_browser_memory_text():
     data = get_browser_memory()
 
     if not data:
-        return "Không phát hiện trình duyệt đang chạy."
+        return "Khong phat hien trinh duyet dang chay."
 
     lines = []
 
@@ -68,7 +89,6 @@ def get_browser_memory_text():
 
 def is_browser_memory_high(limit_gb=4):
     data = get_browser_memory()
-
     limit_bytes = limit_gb * 1024 * 1024 * 1024
 
     for browser, info in data.items():
@@ -84,4 +104,4 @@ if __name__ == "__main__":
     high, browser, memory = is_browser_memory_high(4)
 
     if high:
-        print(f"Cảnh báo: {browser} đang dùng RAM cao: {format_size(memory)}")
+        print(f"Canh bao: {browser} dang dung RAM cao: {format_size(memory)}")

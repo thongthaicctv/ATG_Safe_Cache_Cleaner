@@ -1,5 +1,4 @@
 PySide6
 psutil
-send2trash
 requests
-license
+send2trash

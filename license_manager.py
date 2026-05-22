@@ -1,9 +1,8 @@
 import csv
 import hashlib
 import io
-import platform
-import uuid
 import requests
+import subprocess
 
 from datetime import datetime
 
@@ -59,12 +58,24 @@ def get_bios_serial():
     return ""
 
 
+def get_disk_serial():
+    output = run_cmd("wmic diskdrive get serialnumber")
+
+    lines = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and "SERIAL" not in line.upper()
+    ]
+
+    return lines[0] if lines else ""
+
+
 def get_machine_code():
     uuid_code = get_windows_uuid()
     bios_serial = get_bios_serial()
-    computer_name = platform.node()
+    disk_serial = get_disk_serial()
 
-    raw = f"{uuid_code}|{bios_serial}|{computer_name}|{APP_SECRET}"
+    raw = f"{uuid_code}|{bios_serial}|{disk_serial}|{APP_SECRET}"
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
 

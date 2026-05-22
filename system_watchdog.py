@@ -1,8 +1,10 @@
 import psutil
 
+psutil.cpu_percent(interval=None)
+
 
 def get_cpu_percent():
-    return psutil.cpu_percent(interval=0.5)
+    return psutil.cpu_percent(interval=None)
 
 
 def get_ram_percent():
