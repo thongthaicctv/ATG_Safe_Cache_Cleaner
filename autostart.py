@@ -25,7 +25,7 @@ def enable_autostart():
         APP_NAME,
         0,
         winreg.REG_SZ,
-        f'"{exe_path}"'
+        f'"{exe_path}" --startup'
     )
 
     winreg.CloseKey(key)

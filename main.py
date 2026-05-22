@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
+
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -29,6 +30,8 @@ from file_cleaner import find_old_files, clean_old_files
 from browser_detector import browser_status_text, get_clean_mode
 from autostart import enable_autostart, disable_autostart, is_autostart_enabled
 from app_logger import write_log
+from system_watchdog import is_system_busy
+from disk_watchdog import is_disk_low
 
 
 from PySide6.QtWidgets import (
@@ -53,7 +56,7 @@ from cache_watchdog import (
     is_danger_cache_high,
 )
 
-from system_watchdog import is_system_busy
+
 
 from cache_watchdog import (
     is_danger_cache_high,
@@ -81,14 +84,35 @@ def get_app_data_dir():
 
 CONFIG_FILE = get_app_data_dir() / "config.json"
 
-
 ICON_FILE = "assets/icon.ico"
 LOGO_FILE = "assets/logo.png"
 
 
 def resource_path(relative_path: str) -> str:
-    base_path = getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)
+    base_path = getattr(
+        sys,
+        "_MEIPASS",
+        Path(__file__).resolve().parent
+    )
     return str(Path(base_path) / relative_path)
+
+
+# ================= STARTUP MODE =================
+
+def is_windows_startup():
+
+    args = [x.lower() for x in sys.argv]
+
+    startup_args = [
+        "--startup",
+        "/startup",
+        "-startup"
+    ]
+
+    return any(
+        x in args
+        for x in startup_args
+    )
 
 
 class MainWindow(QWidget):
@@ -110,7 +134,7 @@ class MainWindow(QWidget):
 
         self.last_watchdog_clean = 0
 
-        self.setWindowTitle("ATG Safe Cache Cleaner")
+        self.setWindowTitle(" V1.0.0 | ATG Safe Browser Cache Cleaner - Bản quyền ATG Team")
         self.resize(820, 720)
 
         icon_path = resource_path(ICON_FILE)
@@ -123,7 +147,13 @@ class MainWindow(QWidget):
         self.auto_timer.timeout.connect(self.auto_clean_task)
 
         self.init_ui()
+        self.loading_ui = True
         self.load_ui_state()
+        self.loading_ui = False
+
+        if not Path(CONFIG_FILE).exists():
+            self.save_config()
+            
         self.refresh_browser_status()
 
         self.setup_tray()
@@ -134,8 +164,14 @@ class MainWindow(QWidget):
             self.watchdog_check
         )
 
+        self.disk_timer = QTimer()
+        self.disk_timer.timeout.connect(self.check_disk_space)
+        self.disk_timer.start(60000)
+
+
         QTimer.singleShot(10000, self.start_watchdog)
     
+
     def watchdog_check(self):
 
         # 1. Nếu CPU/RAM hệ thống đang cao thì không clean
@@ -382,11 +418,34 @@ class MainWindow(QWidget):
 
         interval_layout.addWidget(self.spin_interval)
         auto_layout.addLayout(interval_layout)
+        disk_warning_layout = QHBoxLayout()
+
+        self.chk_disable_disk_warning = QCheckBox("Tắt cảnh báo dung lượng thấp")
+        disk_warning_layout.addWidget(self.chk_disable_disk_warning)
+
+        disk_warning_layout.addWidget(QLabel("Cảnh báo khi còn dưới GB:"))
+
+        self.spin_disk_warning_gb = QSpinBox()
+        self.spin_disk_warning_gb.setRange(1, 999)
+        self.spin_disk_warning_gb.setValue(5)
+        disk_warning_layout.addWidget(self.spin_disk_warning_gb)
+
+        auto_layout.addLayout(disk_warning_layout)
+
+        self.chk_disable_disk_warning.stateChanged.connect(self.save_config)
+        self.spin_disk_warning_gb.valueChanged.connect(self.save_config)
 
         self.chk_autostart.stateChanged.connect(self.toggle_autostart)
         self.chk_autoclean.stateChanged.connect(self.toggle_auto_clean)
         self.spin_interval.valueChanged.connect(self.save_config)
         self.spin_keep_cache_days.valueChanged.connect(self.save_config)
+        self.spin_keep_days.valueChanged.connect(self.save_config)
+
+        self.chk_recycle.stateChanged.connect(self.save_config)
+
+        self.chk_autostart.stateChanged.connect(self.save_config)
+
+        self.chk_autoclean.stateChanged.connect(self.save_config)
 
         main_layout.addWidget(auto_group)
 
@@ -447,11 +506,6 @@ class MainWindow(QWidget):
 
         self.log(f"Chế độ hiện tại: {mode}")
 
-
-        text = browser_status_text()
-        mode = get_clean_mode()
-        self.browser_status.setText(text)
-        self.log(f"Chế độ hiện tại: {mode}")
 
     def scan_cache_ui(self):
         keep_days = self.spin_keep_cache_days.value()
@@ -579,6 +633,7 @@ class MainWindow(QWidget):
         self.clean_cache_ui()
 
     def load_config(self):
+
         default = {
             "old_file_folders": [],
             "keep_days": 60,
@@ -586,37 +641,121 @@ class MainWindow(QWidget):
             "recycle_bin": True,
             "auto_clean": False,
             "auto_interval": 60,
+            "disk_warning_gb": 5,
+            "disable_disk_warning": False,
         }
 
         path = Path(CONFIG_FILE)
 
-        if not path.exists():
-            return default
-
         try:
-            with open(path, "r", encoding="utf-8") as f:
+
+            # chạy lần đầu
+            if not path.exists():
+
+                path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True
+                )
+
+                with open(
+                    path,
+                    "w",
+                    encoding="utf-8"
+                ) as f:
+
+                    json.dump(
+                        default,
+                        f,
+                        indent=4,
+                        ensure_ascii=False
+                    )
+
+                return default
+
+            # load file đã có
+            with open(
+                path,
+                "r",
+                encoding="utf-8"
+            ) as f:
+
                 data = json.load(f)
+
                 default.update(data)
-        except Exception:
-            pass
+
+        except Exception as e:
+
+            self.log(
+                f"Lỗi config: {e}"
+            )
 
         return default
 
-    def save_config(self):
-        self.config["old_file_folders"] = [
-            self.folder_list.item(i).text()
-            for i in range(self.folder_list.count())
-        ]
-        self.config["keep_days"] = self.spin_keep_days.value()
-        self.config["keep_cache_days"] = self.spin_keep_cache_days.value()
-        self.config["recycle_bin"] = self.chk_recycle.isChecked()
-        self.config["auto_clean"] = self.chk_autoclean.isChecked()
-        self.config["auto_interval"] = self.spin_interval.value()
+    def save_config(self, *args):
 
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, indent=4, ensure_ascii=False)
+        if getattr(self, "loading_ui", False):
+            return
 
-        self.log("Đã lưu cấu hình")
+        try:
+           
+            self.config["old_file_folders"] = [
+                self.folder_list.item(i).text()
+                for i in range(self.folder_list.count())
+            ]
+
+            self.config["keep_days"] = self.spin_keep_days.value()
+
+            self.config["keep_cache_days"] = (
+                self.spin_keep_cache_days.value()
+            )
+
+            self.config["recycle_bin"] = (
+                self.chk_recycle.isChecked()
+            )
+
+            self.config["auto_clean"] = (
+                self.chk_autoclean.isChecked()
+            )
+
+            self.config["auto_interval"] = (
+                self.spin_interval.value()
+            )
+
+            self.config["disable_disk_warning"] = (
+                self.chk_disable_disk_warning.isChecked()
+            )
+
+            self.config["disk_warning_gb"] = (
+                self.spin_disk_warning_gb.value()
+            )
+
+            path = Path(CONFIG_FILE)
+
+            path.parent.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+            with open(
+                path,
+                "w",
+                encoding="utf-8"
+            ) as f:
+
+                json.dump(
+                    self.config,
+                    f,
+                    indent=4,
+                    ensure_ascii=False
+                )
+                self.status_info.setText(f"Đã lưu cấu hình: {path}")
+                write_log(f"Đã lưu cấu hình: {sys.path}")
+
+        except Exception as e:
+
+            self.log(
+                f"Lỗi lưu config: {e}"
+            )
 
     def load_ui_state(self):
         self.folder_list.clear()
@@ -627,16 +766,30 @@ class MainWindow(QWidget):
         self.spin_keep_days.setValue(self.config.get("keep_days", 60))
         self.spin_keep_cache_days.setValue(self.config.get("keep_cache_days", 7))
         self.chk_recycle.setChecked(self.config.get("recycle_bin", True))
+        self.chk_disable_disk_warning.setChecked(
+            self.config.get("disable_disk_warning", False)
+        )
         self.spin_interval.setValue(self.config.get("auto_interval", 60))
+        self.spin_disk_warning_gb.setValue(
+            self.config.get("disk_warning_gb", 5)
+        )
 
+        self.chk_autoclean.blockSignals(True)
+        self.chk_autoclean.setChecked(self.config.get("auto_clean", False))
+        self.chk_autoclean.blockSignals(False)
+
+        if self.chk_autoclean.isChecked():
+            minutes = self.spin_interval.value()
+            self.auto_timer.start(minutes * 60 * 1000)
+        else:
+            self.auto_timer.stop()
+            
         try:
             self.chk_autostart.setChecked(is_autostart_enabled())
         except Exception:
             self.chk_autostart.setChecked(False)
 
-        if self.config.get("auto_clean", False):
-            self.chk_autoclean.setChecked(True)
-            self.toggle_auto_clean()
+        
 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục cần dọn file cũ")
@@ -692,6 +845,38 @@ class MainWindow(QWidget):
         self.save_config()
         self.log("Đã xoá toàn bộ danh sách thư mục")
     
+    def check_disk_space(self):
+
+        if self.chk_disable_disk_warning.isChecked():
+            return
+
+        folders = [
+            self.folder_list.item(i).text()
+            for i in range(self.folder_list.count())
+        ]
+
+        if not folders:
+            return
+
+        for folder in folders:
+            limit_gb = self.spin_disk_warning_gb.value()
+            low, free_gb = is_disk_low(folder, limit_gb=limit_gb)
+
+            if low:
+                msg = f"Ổ đĩa chỉ còn {free_gb:.2f} GB.\n"
+                f"Ngưỡng cảnh báo: dưới {limit_gb} GB.\n"
+                self.log(msg)
+
+                QMessageBox.warning(
+                    self,
+                    "Cảnh báo dung lượng thấp",
+                    f"Thư mục:\n{folder}\n\n"
+                    f"Ổ đĩa chỉ còn {free_gb:.2f} GB.\n"
+                    f"Nên dọn dẹp hoặc chuyển dữ liệu."
+                )
+
+                return
+            
     def can_watchdog_clean(self):
 
         cooldown = 10 * 60
@@ -782,6 +967,11 @@ class MainWindow(QWidget):
                 self.tray_icon.deleteLater()
         except Exception:
             pass
+        
+        try:
+            self.disk_timer.stop()
+        except Exception:
+            pass
 
         QApplication.quit()
         
@@ -833,6 +1023,22 @@ if __name__ == "__main__":
         sys.exit()
 
     window = MainWindow()
-    window.show()
+
+    if is_windows_startup():
+
+        window.hide()
+
+        QTimer.singleShot(
+            2000,
+            lambda: window.tray_icon.showMessage(
+                "ATG Safe Cache Cleaner",
+                "Đã khởi động nền cùng Windows\nWatchdog đang hoạt động",
+                QSystemTrayIcon.Information,
+                5000
+            )
+        )
+
+    else:
+        window.show()
 
     sys.exit(app.exec())
